@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "aedes": "^0.51.3",
+    "createserver": "^1.0.0",
+    "mqtt": "^5.15.0"
+  }
+}
