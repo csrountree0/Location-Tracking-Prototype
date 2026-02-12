@@ -1,3 +1,5 @@
+// this file mainly serves as a test for the mqtt broker to verify data is received from "devices"
+
 import mqtt from 'mqtt';
 
 const client = mqtt.connect('mqtt://localhost:1883', {

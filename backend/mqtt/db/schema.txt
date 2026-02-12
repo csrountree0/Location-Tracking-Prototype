@@ -1,0 +1,21 @@
+
+                                            Table devices
+   Column   |            Type             | Collation | Nullable |              Default               
+------------+-----------------------------+-----------+----------+------------------------------------
+ id         | integer                     |           | not null | nextval('assets_id_seq'::regclass)
+ name       | text                        |           | not null | 
+ created_at | timestamp without time zone |           |          | now()
+
+
+
+                                          Table locations
+   Column    |            Type             | Collation | Nullable |                Default                
+-------------+-----------------------------+-----------+----------+---------------------------------------
+ id          | bigint                      |           | not null | nextval('locations_id_seq'::regclass)
+ device_id   | integer                     |           |          | 
+ recorded_at | timestamp without time zone |           |          | now()
+ lat         | numeric(10,8)               |           | not null | 
+ lon         | numeric(11,8)               |           | not null | 
+
+
+ 
