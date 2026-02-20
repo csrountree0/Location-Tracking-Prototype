@@ -20,7 +20,11 @@ const pool = new Pool({
 export async function getLatestLocations() {
   const result = await pool.query(
     `SELECT DISTINCT ON (d.id)
-       d.id AS device_id, d.name, l.lat, l.lon, l.recorded_at
+       d.id AS device_id, 
+       d.name, 
+       ST_Y(l.position::geometry) AS lat,
+       ST_X(l.position::geometry) AS lon,
+       l.recorded_at
      FROM devices d
      JOIN locations l ON l.device_id = d.id
      ORDER BY d.id, l.recorded_at DESC`

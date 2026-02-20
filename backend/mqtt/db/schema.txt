@@ -7,15 +7,34 @@
  created_at | timestamp without time zone |           |          | now()
 
 
-
-                                          Table locations
+                                         Table locations
    Column    |            Type             | Collation | Nullable |                Default                
 -------------+-----------------------------+-----------+----------+---------------------------------------
  id          | bigint                      |           | not null | nextval('locations_id_seq'::regclass)
  device_id   | integer                     |           |          | 
  recorded_at | timestamp without time zone |           |          | now()
- lat         | numeric(10,8)               |           | not null | 
- lon         | numeric(11,8)               |           | not null | 
+ position    | geography(Point,4326)       |           |          | 
 
 
- 
+                                           Table routes
+  Column  |            Type            | Collation | Nullable |                 Default                  
+----------+----------------------------+-----------+----------+------------------------------------------
+ route_id | integer                    |           | not null | nextval('routes_route_id_seq'::regclass)
+ name     | character varying(100)     |           |          | 
+ path     | geography(LineString,4326) |           |          | 
+
+
+                                        Table stops
+  Column  |          Type          | Collation | Nullable |                Default                 
+----------+------------------------+-----------+----------+----------------------------------------
+ stop_id  | integer                |           | not null | nextval('stops_stop_id_seq'::regclass)
+ name     | character varying(100) |           |          | 
+ location | geography(Point,4326)  |           |          | 
+
+
+              Table route_stops
+   Column   |  Type   | Collation | Nullable | Default 
+------------+---------+-----------+----------+---------
+ route_id   | integer |           | not null | 
+ stop_id    | integer |           | not null | 
+ stop_order | integer |           |          | 

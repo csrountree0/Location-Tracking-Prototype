@@ -40,16 +40,15 @@ export async function getOrCreateDevice(deviceName) {
 }
 
 
-// Insert a location record into the database
+// insert location into database using postgis geography type
 export async function insertLocation(deviceId, lat, lon, timestamp) {
   const result = await pool.query(
-    `INSERT INTO locations (device_id, lat, lon, recorded_at)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, device_id, lat, lon, recorded_at`,
+    `INSERT INTO locations (device_id, recorded_at, location)
+     VALUES ($1, $4, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography)
+     RETURNING id, device_id, recorded_at, location`,
     [deviceId, lat, lon, timestamp || new Date()]
   );
-
-  return result.rows[0]; // return the newly inserted record.
+  return result.rows[0];
 }
 
 // process and store location data from MQTT message
@@ -69,12 +68,10 @@ export async function processLocationData(data) {
   };
 }
 
-// close the connection
-export async function closePool() {
-  await pool.end();
-}
 
-// test database connection: node db.js
+
+
+// test database connection
 async function testConnection() {
   console.log(process.env.DB_HOST);
   try {
@@ -87,8 +84,14 @@ async function testConnection() {
   }
 }
 
+// for testing connection to db
 if (process.argv[1].endsWith('db.js')) {
   testConnection();
+}
+
+// close the connection
+export async function closePool() {
+  await pool.end();
 }
 
 export default pool;

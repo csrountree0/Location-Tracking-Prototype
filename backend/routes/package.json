@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@xmldom/xmldom": "^0.8.11",
+    "dotenv": "^17.3.1",
+    "pg": "^8.18.0"
+  }
+}
