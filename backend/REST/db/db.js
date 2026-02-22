@@ -33,6 +33,32 @@ export async function getLatestLocations() {
   return result.rows;
 }
 
+// get all the routes with their corresponding stops
+export async function getAllRoutesWithStops() {
+  const result = await pool.query(
+    `SELECT 
+       r.route_id,
+       r.name,
+       ST_AsGeoJSON(r.path)::json as path,
+       (
+         SELECT json_agg(
+           json_build_object(
+             'stop_id', s.stop_id,
+             'name', s.name,
+             'location', ST_AsGeoJSON(s.location)::json,
+             'stop_order', rs.stop_order
+           ) ORDER BY rs.stop_order
+         )
+         FROM route_stops rs
+         JOIN stops s ON rs.stop_id = s.stop_id
+         WHERE rs.route_id = r.route_id
+       ) as stops
+     FROM routes r`
+  );
+  return result.rows;
+}
+
+
 // close the connection
 export async function closePool() {
   await pool.end();

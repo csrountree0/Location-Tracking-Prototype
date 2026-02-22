@@ -1,5 +1,5 @@
 import express from 'express';
-import { getLatestLocations, closePool } from './db/db.js';
+import { getLatestLocations,getAllRoutesWithStops, closePool } from './db/db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,6 +9,17 @@ const PORT = process.env.PORT || 3000;
 app.get('/devices', async (req, res) => {
   try {
     const devices = await getLatestLocations();
+    res.json(devices);
+  } catch (err) {
+    console.error('Failed to fetch devices:', err);
+    res.status(500).json({ error: 'Failed to fetch devices' });
+  }
+});
+
+// routes endpoint, gets all routes and stops
+app.get('/routes', async (req, res) => {
+  try {
+    const devices = await getAllRoutesWithStops();
     res.json(devices);
   } catch (err) {
     console.error('Failed to fetch devices:', err);
