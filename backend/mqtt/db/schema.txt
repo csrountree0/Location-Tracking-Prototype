@@ -13,7 +13,7 @@
  id          | bigint                      |           | not null | nextval('locations_id_seq'::regclass)
  device_id   | integer                     |           |          | 
  recorded_at | timestamp without time zone |           |          | now()
- position    | geography(Point,4326)       |           |          | 
+ location    | geography(Point,4326)       |           |          | 
 
 
                                            Table routes

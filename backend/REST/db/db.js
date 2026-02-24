@@ -22,8 +22,8 @@ export async function getLatestLocations() {
     `SELECT DISTINCT ON (d.id)
        d.id AS device_id, 
        d.name, 
-       ST_Y(l.position::geometry) AS lat,
-       ST_X(l.position::geometry) AS lon,
+       ST_Y(l.location::geometry) AS lat,
+       ST_X(l.location::geometry) AS lon,
        l.recorded_at
      FROM devices d
      JOIN locations l ON l.device_id = d.id

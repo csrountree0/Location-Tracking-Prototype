@@ -46,7 +46,7 @@ export async function insertLocation(deviceId, lat, lon, timestamp) {
     `INSERT INTO locations (device_id, recorded_at, location)
      VALUES ($1, $4, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography)
      RETURNING id, device_id, recorded_at, location`,
-    [deviceId, lat, lon, timestamp || new Date()]
+    [deviceId, lat, lon, timestamp || new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })]
   );
   return result.rows[0];
 }

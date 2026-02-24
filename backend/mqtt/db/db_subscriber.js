@@ -1,7 +1,11 @@
 import mqtt from 'mqtt';
 import { processLocationData, closePool } from './db.js';
+import dotenv from 'dotenv';
 
-const client = mqtt.connect('mqtt://localhost:1883', {
+dotenv.config();
+
+//mqtt://localhost:1883
+const client = mqtt.connect(process.env.url, {
   clientId: 'db_subscriber',
   clean: true
 });

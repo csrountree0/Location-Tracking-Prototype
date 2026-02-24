@@ -1,5 +1,7 @@
 import mqtt from 'mqtt';
 
+
+// https://bloops0.tail98a4de.ts.net/broker 
 const client = mqtt.connect('mqtt://localhost:1883', {
   clientId: 'test_publisher'
 });
