@@ -6,7 +6,7 @@ const PORT = process.env.PORT || 3000;
 
 
 // devices endpoint, retrieves the latest location data, will probably rename to something better
-app.get('/devices', async (req, res) => {
+app.get('/api/devices', async (req, res) => {
   try {
     const devices = await getLatestLocations();
     res.json(devices);
@@ -17,7 +17,7 @@ app.get('/devices', async (req, res) => {
 });
 
 // routes endpoint, gets all routes and stops
-app.get('/routes', async (req, res) => {
+app.get('/api/routes', async (req, res) => {
   try {
     const devices = await getAllRoutesWithStops();
     res.json(devices);
