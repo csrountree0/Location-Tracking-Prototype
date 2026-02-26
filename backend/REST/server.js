@@ -4,6 +4,7 @@ import { getLatestLocations,getAllRoutesWithStops, closePool } from './db/db.js'
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(cors())
 
 // devices endpoint, retrieves the latest location data, will probably rename to something better
 app.get('/api/devices', async (req, res) => {
