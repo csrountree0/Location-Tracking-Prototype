@@ -6,3 +6,28 @@ body {
 #map {
   height: 90vh;
 }
+
+/* Status Panel */
+.status-panel {
+  background: white;
+  padding: 12px;
+  font-size: 14px;
+  line-height: 18px;
+  border-radius: 8px;
+  box-shadow: 0 0 15px rgba(0,0,0,0.25);
+  width: 220px;
+}
+
+.status-panel h4 {
+  margin: 0 0 8px;
+}
+
+/* Legend */
+.info.legend {
+  background: white;
+  padding: 10px;
+  font-size: 14px;
+  line-height: 18px;
+  border-radius: 6px;
+  box-shadow: 0 0 15px rgba(0,0,0,0.2);
+}
