@@ -1,8 +1,10 @@
 import express from 'express';
-import { getLatestLocations,getAllRoutesWithStops, closePool } from './db/db.js';
+import cors from 'cors';
+import { getLatestLocations,getAllRoutesWithStops, getAllLocations, closePool } from './db/db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
 
 app.use(cors())
 
@@ -24,7 +26,18 @@ app.get('/api/routes', async (req, res) => {
     res.json(devices);
   } catch (err) {
     console.error('Failed to fetch devices:', err);
-    res.status(500).json({ error: 'Failed to fetch devices' });
+    res.status(500).json({ error: 'Failed to fetch routes' });
+  }
+});
+
+// get all location data
+app.get('/api/all', async (req, res) => {
+  try {
+    const devices = await getAllLocations();
+    res.json(devices);
+  } catch (err) {
+    console.error('Failed to fetch devices:', err);
+    res.status(500).json({ error: 'Failed to fetch data' });
   }
 });
 

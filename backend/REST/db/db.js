@@ -59,6 +59,24 @@ export async function getAllRoutesWithStops() {
 }
 
 
+// get all location data (testing mainly)
+export async function getAllLocations() {
+  const result = await pool.query(
+   `SELECT
+       d.id AS device_id, 
+       d.name, 
+       ST_Y(l.location::geometry) AS lat,
+       ST_X(l.location::geometry) AS lon,
+       l.recorded_at
+     FROM devices d
+     JOIN locations l ON l.device_id = d.id
+     ORDER BY d.id, l.recorded_at DESC`
+  );
+
+  return result.rows;
+}
+
+
 // close the connection
 export async function closePool() {
   await pool.end();
