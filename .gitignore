@@ -1,0 +1,5 @@
+.env
+node_modules
+subscriber.js
+sample_device.js
+/0test
