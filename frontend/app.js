@@ -1,6 +1,6 @@
-console.log("APP JS IS RUNNING");
 console.log("APP STARTED");
 
+// INITIALIZE MAP
 const map = L.map("map").setView([28.1480, -81.8484], 15);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -8,80 +8,149 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19
 }).addTo(map);
 
+// CUSTOM ICONS
+const stopIcon = L.icon({
+  iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+  iconSize: [32, 32]
+});
 
-// Fetch and display routes
+const activeCartIcon = L.icon({
+  iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+  iconSize: [32, 32]
+});
+
+const staleCartIcon = L.icon({
+  iconUrl: "https://maps.google.com/mapfiles/ms/icons/orange-dot.png",
+  iconSize: [32, 32]
+});
+
+// STATUS PANEL (TOP RIGHT)
+const statusControl = L.control({ position: "topright" });
+
+statusControl.onAdd = function () {
+  const div = L.DomUtil.create("div", "status-panel");
+  div.id = "statusPanel";
+  div.innerHTML = `
+    <h4>Device Status</h4>
+    Waiting for data...
+  `;
+  return div;
+};
+
+statusControl.addTo(map);
+
+// FETCH AND DISPLAY HISTORICAL ROUTE
 fetch("https://bloops0.tail98a4de.ts.net/API/routes")
   .then(res => res.json())
   .then(data => {
-    console.log("RAW ROUTES DATA:", data);
 
-    if (!Array.isArray(data) || data.length === 0) {
-      console.error("No routes returned");
-      return;
-    }
+    if (!Array.isArray(data) || data.length === 0) return;
 
     const firstRoute = data[0];
-    const path = firstRoute.path;
 
-    if (!path || !path.coordinates || !Array.isArray(path.coordinates)) {
-      console.error("Route path is missing or invalid");
-      return;
+    if (firstRoute.path?.coordinates) {
+      const routeCoordinates = firstRoute.path.coordinates.map(coord => [
+        coord[1],
+        coord[0]
+      ]);
+
+      const routePolyline = L.polyline(routeCoordinates, {
+        color: "blue",
+        weight: 4
+      }).addTo(map);
+
+      map.fitBounds(routePolyline.getBounds());
     }
 
-    // Convert GeoJSON [lon, lat] to Leaflet [lat, lng]
-    const routeCoordinates = path.coordinates.map(coord => [coord[1], coord[0]]);
+    if (firstRoute.stops) {
+      firstRoute.stops.forEach(stop => {
+        if (stop.location?.coordinates) {
+          const coords = stop.location.coordinates;
 
-    // Draw polyline
-    const routePolyline = L.polyline(routeCoordinates, { color: "blue", weight: 4 }).addTo(map);
+          L.marker([coords[1], coords[0]], { icon: stopIcon })
+            .addTo(map)
+            .bindPopup(stop.name || "Stop");
+        }
+      });
+    }
 
-    // Fit map to route bounds
-    map.fitBounds(routePolyline.getBounds());
-
-    // Start/End markers
-    L.marker(routeCoordinates[0]).addTo(map).bindPopup("Start").openPopup();
-    L.marker(routeCoordinates[routeCoordinates.length - 1]).addTo(map).bindPopup("End");
   })
   .catch(err => console.error("Routes fetch error:", err));
 
-// Fetch and display devices
+// LIVE DEVICE TRACKING
 let deviceMarkers = {};
 
 function fetchAndUpdateDevices() {
   fetch("https://bloops0.tail98a4de.ts.net/API/devices")
     .then(res => res.json())
     .then(devices => {
-      console.log("DEVICES DATA:", devices);
 
       devices.forEach(device => {
-        const key = device.device_id;
 
-        // Normalize lat/lng
+        const key = device.device_id;
         const lat = Number(device.lat);
         const lng = Number(device.lon);
-        if (isNaN(lat) || isNaN(lng)) {
-          console.error("Invalid device coordinates:", device);
-          return;
-        }
+        if (isNaN(lat) || isNaN(lng)) return;
 
-        console.log(`Device ${device.device_id}: ${lat}, ${lng}`);
+        const recordedTime = new Date(device.recorded_at);
+        const now = new Date();
+        const diffSeconds = Math.floor((now - recordedTime) / 1000);
+        const localTime = recordedTime.toLocaleString();
+
+        const isStale = diffSeconds > 30;
+        const iconToUse = isStale ? staleCartIcon : activeCartIcon;
+        const statusText = isStale
+          ? `⚠️ Stale (${diffSeconds}s old)`
+          : `🟢 Active (${diffSeconds}s ago)`;
+
+        // Update status panel
+        const panel = document.getElementById("statusPanel");
+        panel.innerHTML = `
+          <h4>Device Status</h4>
+          <b>${device.name}</b><br>
+          Device ID: ${key}<br>
+          Lat: ${lat.toFixed(5)}<br>
+          Lng: ${lng.toFixed(5)}<br>
+          Recorded: ${localTime}<br>
+          Status: ${statusText}<br>
+          <hr>
+          <b>System Time:</b><br>
+          ${now.toLocaleString()}
+        `;
 
         if (deviceMarkers[key]) {
-          // Move existing marker
           deviceMarkers[key].setLatLng([lat, lng]);
+          deviceMarkers[key].setIcon(iconToUse);
         } else {
-          // Create new marker
-          const marker = L.marker([lat, lng])
+          deviceMarkers[key] = L.marker([lat, lng], { icon: iconToUse })
             .addTo(map)
-            .bindPopup(device.name || device.device_id);
-          deviceMarkers[key] = marker;
+            .bindPopup(device.name);
         }
+
       });
+
     })
     .catch(err => console.error("Devices fetch error:", err));
 }
 
-// Initial fetch
 fetchAndUpdateDevices();
-
-// Refresh every 5 seconds
 setInterval(fetchAndUpdateDevices, 5000);
+
+// MAP LEGEND
+const legend = L.control({ position: "bottomright" });
+
+legend.onAdd = function () {
+  const div = L.DomUtil.create("div", "info legend");
+
+  div.innerHTML = `
+    <h4>Map Key</h4>
+    <div><span style="color:blue;">&#8212;&#8212;&#8212;</span> Historical Route</div>
+    <div><img src="https://maps.google.com/mapfiles/ms/icons/red-dot.png" width="16"/> Stop</div>
+    <div><img src="https://maps.google.com/mapfiles/ms/icons/green-dot.png" width="16"/> Active Device</div>
+    <div><img src="https://maps.google.com/mapfiles/ms/icons/orange-dot.png" width="16"/> Stale Device</div>
+  `;
+
+  return div;
+};
+
+legend.addTo(map);
