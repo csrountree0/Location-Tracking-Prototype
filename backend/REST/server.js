@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { getLatestLocations,getAllRoutesWithStops, getAllLocations, closePool } from './db/db.js';
+import { getLatestLocations,getAllRoutesWithStops, getAllLocations,getNextStopWithETA, closePool } from './db/db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors())
 
-// devices endpoint, retrieves the latest location data, will probably rename to something better
-app.get('/api/devices', async (req, res) => {
+// latestlocations endpoint, retrieves the latest location data for each vehicle/device
+app.get('/api/latestlocations', async (req, res) => {
   try {
     const devices = await getLatestLocations();
     res.json(devices);
@@ -38,6 +38,48 @@ app.get('/api/all', async (req, res) => {
   } catch (err) {
     console.error('Failed to fetch devices:', err);
     res.status(500).json({ error: 'Failed to fetch data' });
+  }
+});
+
+// get the eta for all devices along a given route
+// /api/eta?routeId=1&startTime=2026-01-01&endTime=2026-12-31 example query
+app.get('/api/eta', async (req, res) => {
+ 
+  try {
+     console.log(req.query)
+    const { routeId, startTime, endTime } = req.query;
+    
+    if (!routeId) {
+      return res.status(400).json({ error: 'routeId required' });
+    }
+    
+    const vehicles = await getNextStopWithETA(
+      parseInt(routeId),
+      startTime,
+      endTime
+    );
+    
+    res.json({
+      count: vehicles.length,
+      vehicles: vehicles.map(v => ({
+        deviceId: v.device_id,
+        name: v.device_name,
+        location: {
+          lat: parseFloat(v.lat),
+          lon: parseFloat(v.lon),
+          positionPct: parseFloat(v.position_pct)
+        },
+        lastUpdated: v.recorded_at,
+        status: v.status,
+        currentOrNearestStop: v.nearest_stop_name,
+        nextStop: v.next_stop_name,
+        etaMinutes: v.eta_minutes ? parseFloat(v.eta_minutes) : null,
+        speedPctPerMin: v.speed_pct_per_min ? parseFloat(v.speed_pct_per_min) : null
+      }))
+    });
+  } catch (err) {
+    console.error('ETA endpoint error:', err);
+    res.status(500).json({ error: 'Failed to retrieve vehicle ETAs' });
   }
 });
 

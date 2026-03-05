@@ -2,8 +2,10 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
+const { Pool, types } = pg;
 
-const { Pool } = pg;
+types.setTypeParser(1184, str => str);
+
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -12,6 +14,10 @@ const pool = new Pool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD
 });
+
+
+
+
 
 // get a device by name, or create it if it doesn't exist
 export async function getOrCreateDevice(deviceName) {
@@ -46,7 +52,7 @@ export async function insertLocation(deviceId, lat, lon, timestamp) {
     `INSERT INTO locations (device_id, recorded_at, location)
      VALUES ($1, $4, ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography)
      RETURNING id, device_id, recorded_at, location`,
-    [deviceId, lat, lon, timestamp || new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })]
+    [deviceId, lat, lon, timestamp || new Date()]
   );
   return result.rows[0];
 }
@@ -68,15 +74,11 @@ export async function processLocationData(data) {
   };
 }
 
-
-
-
 // test database connection
 async function testConnection() {
   console.log(process.env.DB_HOST);
   try {
-    const res = await pool.query('SELECT NOW() AS time');
-    console.log('Connection successful:', res.rows[0].time);
+   console.log(await insertLocation(14,80,80))
   } catch (err) {
     console.error('Connection failed:', err);
   } finally {
