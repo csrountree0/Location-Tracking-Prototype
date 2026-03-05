@@ -3,17 +3,13 @@ console.log("APP STARTED");
 // INITIALIZE MAP
 const map = L.map("map").setView([28.1480, -81.8484], 15);
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: '&copy; OpenStreetMap contributors',
   maxZoom: 19
 }).addTo(map);
 
-// CUSTOM ICONS
-const stopIcon = L.icon({
-  iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
-  iconSize: [32, 32]
-});
 
+// ICONS
 const activeCartIcon = L.icon({
   iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
   iconSize: [32, 32]
@@ -24,22 +20,46 @@ const staleCartIcon = L.icon({
   iconSize: [32, 32]
 });
 
-// STATUS PANEL (TOP RIGHT)
-const statusControl = L.control({ position: "topright" });
+const stopIcon = L.icon({
+  iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+  iconSize: [32, 32]
+});
 
-statusControl.onAdd = function () {
-  const div = L.DomUtil.create("div", "status-panel");
-  div.id = "statusPanel";
+
+// LEGEND
+const legend = L.control({ position: "bottomright" });
+
+legend.onAdd = function () {
+  const div = L.DomUtil.create("div");
+
   div.innerHTML = `
-    <h4>Device Status</h4>
-    Waiting for data...
+    <div style="
+      background: white;
+      padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+      font-size: 14px;
+    ">
+      <b>Map Key</b><br><br>
+      <img src="https://maps.google.com/mapfiles/ms/icons/green-dot.png" width="16"> Active Cart<br>
+      <img src="https://maps.google.com/mapfiles/ms/icons/orange-dot.png" width="16"> Stale Cart<br>
+      <img src="https://maps.google.com/mapfiles/ms/icons/red-dot.png" width="16"> Stop<br>
+      <div style="
+        width: 20px;
+        height: 4px;
+        background: blue;
+        display: inline-block;
+        margin-right: 5px;
+      "></div> Device History Trail
+    </div>
   `;
+
   return div;
 };
 
-statusControl.addTo(map);
+legend.addTo(map);
 
-// FETCH AND DISPLAY HISTORICAL ROUTE
+// FETCH ROUTE STOPS (STATIC)
 fetch("https://bloops0.tail98a4de.ts.net/API/routes")
   .then(res => res.json())
   .then(data => {
@@ -48,109 +68,126 @@ fetch("https://bloops0.tail98a4de.ts.net/API/routes")
 
     const firstRoute = data[0];
 
-    if (firstRoute.path?.coordinates) {
-      const routeCoordinates = firstRoute.path.coordinates.map(coord => [
-        coord[1],
-        coord[0]
-      ]);
-
-      const routePolyline = L.polyline(routeCoordinates, {
-        color: "blue",
-        weight: 4
-      }).addTo(map);
-
-      map.fitBounds(routePolyline.getBounds());
-    }
-
-    if (firstRoute.stops) {
+    if (Array.isArray(firstRoute.stops)) {
       firstRoute.stops.forEach(stop => {
-        if (stop.location?.coordinates) {
-          const coords = stop.location.coordinates;
 
-          L.marker([coords[1], coords[0]], { icon: stopIcon })
-            .addTo(map)
-            .bindPopup(stop.name || "Stop");
-        }
+        const coords = stop.location?.coordinates;
+        if (!coords) return;
+
+        L.marker([coords[1], coords[0]], { icon: stopIcon })
+          .addTo(map)
+          .bindPopup(stop.name || "Stop");
       });
     }
 
   })
-  .catch(err => console.error("Routes fetch error:", err));
+  .catch(err => console.error("Stops fetch error:", err));
 
-// LIVE DEVICE TRACKING
+// DEVICE HISTORY (MULTI READY)
+let devicePolylines = {};
 let deviceMarkers = {};
 
-function fetchAndUpdateDevices() {
-  fetch("https://bloops0.tail98a4de.ts.net/API/devices")
+function fetchFullHistory() {
+
+  fetch("https://bloops0.tail98a4de.ts.net/API/all")
     .then(res => res.json())
-    .then(devices => {
+    .then(data => {
 
-      devices.forEach(device => {
+      if (!Array.isArray(data)) return;
 
-        const key = device.device_id;
-        const lat = Number(device.lat);
-        const lng = Number(device.lon);
+      // Group by device_id
+      const grouped = {};
+
+      data.forEach(point => {
+
+        const id = point.device_id;
+        const lat = Number(point.lat);
+        const lng = Number(point.lon);
+
         if (isNaN(lat) || isNaN(lng)) return;
 
-        const recordedTime = new Date(device.recorded_at);
-        const now = new Date();
-        const diffSeconds = Math.floor((now - recordedTime) / 1000);
-        const localTime = recordedTime.toLocaleString();
+        if (!grouped[id]) grouped[id] = [];
 
-        const isStale = diffSeconds > 30;
-        const iconToUse = isStale ? staleCartIcon : activeCartIcon;
-        const statusText = isStale
-          ? `⚠️ Stale (${diffSeconds}s old)`
-          : `🟢 Active (${diffSeconds}s ago)`;
+        grouped[id].push({
+          lat,
+          lng,
+          recorded_at: point.recorded_at
+        });
 
-        // Update status panel
-        const panel = document.getElementById("statusPanel");
-        panel.innerHTML = `
-          <h4>Device Status</h4>
-          <b>${device.name}</b><br>
-          Device ID: ${key}<br>
-          Lat: ${lat.toFixed(5)}<br>
-          Lng: ${lng.toFixed(5)}<br>
-          Recorded: ${localTime}<br>
-          Status: ${statusText}<br>
-          <hr>
-          <b>System Time:</b><br>
-          ${now.toLocaleString()}
-        `;
+      });
 
-        if (deviceMarkers[key]) {
-          deviceMarkers[key].setLatLng([lat, lng]);
-          deviceMarkers[key].setIcon(iconToUse);
+      // Draw trail per device
+      Object.keys(grouped).forEach(id => {
+
+        const sortedPoints = grouped[id]
+          .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+
+        const coordinates = sortedPoints.map(p => [p.lat, p.lng]);
+
+        if (devicePolylines[id]) {
+          devicePolylines[id].setLatLngs(coordinates);
         } else {
-          deviceMarkers[key] = L.marker([lat, lng], { icon: iconToUse })
-            .addTo(map)
-            .bindPopup(device.name);
+          devicePolylines[id] = L.polyline(coordinates, {
+            color: "blue",
+            weight: 4
+          }).addTo(map);
         }
 
       });
 
     })
-    .catch(err => console.error("Devices fetch error:", err));
+    .catch(err => console.error("History fetch error:", err));
 }
 
-fetchAndUpdateDevices();
-setInterval(fetchAndUpdateDevices, 5000);
+// LIVE TRACKING (MULTI READY)
+function fetchLiveDevices() {
 
-// MAP LEGEND
-const legend = L.control({ position: "bottomright" });
+  fetch("https://bloops0.tail98a4de.ts.net/API/devices")
+    .then(res => res.json())
+    .then(devices => {
 
-legend.onAdd = function () {
-  const div = L.DomUtil.create("div", "info legend");
+      if (!Array.isArray(devices)) return;
 
-  div.innerHTML = `
-    <h4>Map Key</h4>
-    <div><span style="color:blue;">&#8212;&#8212;&#8212;</span> Historical Route</div>
-    <div><img src="https://maps.google.com/mapfiles/ms/icons/red-dot.png" width="16"/> Stop</div>
-    <div><img src="https://maps.google.com/mapfiles/ms/icons/green-dot.png" width="16"/> Active Device</div>
-    <div><img src="https://maps.google.com/mapfiles/ms/icons/orange-dot.png" width="16"/> Stale Device</div>
-  `;
+      devices.forEach(device => {
 
-  return div;
-};
+        const id = device.device_id;
+        const lat = Number(device.lat);
+        const lng = Number(device.lon);
 
-legend.addTo(map);
+        if (isNaN(lat) || isNaN(lng)) return;
+
+        const recordedTime = new Date(device.recorded_at);
+        const now = new Date();
+        const diffSeconds = Math.floor((now - recordedTime) / 1000);
+
+        const iconToUse = diffSeconds > 30 ? staleCartIcon : activeCartIcon;
+
+        const popupContent = `
+          <b>${device.name || "Golf Cart"}</b><br>
+          Device ID: ${id}<br>
+          Recorded: ${recordedTime.toLocaleString()}<br>
+          Status: ${diffSeconds > 30 ? "Stale" : "Active"}
+        `;
+
+        if (deviceMarkers[id]) {
+          deviceMarkers[id].setLatLng([lat, lng]);
+          deviceMarkers[id].setIcon(iconToUse);
+          deviceMarkers[id].setPopupContent(popupContent);
+        } else {
+          deviceMarkers[id] = L.marker([lat, lng], { icon: iconToUse })
+            .addTo(map)
+            .bindPopup(popupContent);
+        }
+
+      });
+
+    })
+    .catch(err => console.error("Live fetch error:", err));
+}
+
+// INITIAL LOAD
+fetchFullHistory();
+fetchLiveDevices();
+
+// Refresh live every 5 seconds
+setInterval(fetchLiveDevices, 5000);
