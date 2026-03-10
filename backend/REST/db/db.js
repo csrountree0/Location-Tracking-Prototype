@@ -83,79 +83,87 @@ export async function getAllLocations() {
 // get the eta for each device following a given route
 export async function getNextStopWithETA(routeId, startTime, endTime) {
   const result = await pool.query(`
-    WITH ordered_locations AS (
-      SELECT 
+    WITH route AS (
+      SELECT path FROM routes WHERE route_id = $1
+    ),
+    stop_positions AS (
+      SELECT
+        s.name,
+        rs.stop_order,
+        ST_LineLocatePoint(r.path::geometry, s.location::geometry) as stop_pct
+      FROM stops s
+      JOIN route_stops rs ON s.stop_id = rs.stop_id
+      CROSS JOIN route r
+      WHERE rs.route_id = $1
+    ),
+    first_stop AS (
+      SELECT name, stop_pct FROM stop_positions WHERE stop_order = 1
+    ),
+    last_stop AS (
+      SELECT stop_pct FROM stop_positions ORDER BY stop_order DESC LIMIT 1
+    ),
+    located_locations AS (
+      SELECT
         l.id as location_id,
         l.device_id,
         d.name as device_name,
         l.recorded_at,
         l.location,
-        ST_LineLocatePoint(r.path::geometry, l.location::geometry) as device_pct,
-        LAG(ST_LineLocatePoint(r.path::geometry, l.location::geometry)) 
-          OVER (PARTITION BY l.device_id ORDER BY l.recorded_at) as prev_pct,
-        LAG(l.recorded_at) 
-          OVER (PARTITION BY l.device_id ORDER BY l.recorded_at) as prev_time
+        ST_LineLocatePoint(r.path::geometry, l.location::geometry) as device_pct
       FROM locations l
       JOIN devices d ON l.device_id = d.id
-      CROSS JOIN routes r
-      WHERE r.route_id = $1
-        AND l.recorded_at BETWEEN $2 AND $3
+      CROSS JOIN route r
+      WHERE l.recorded_at BETWEEN COALESCE($2::timestamptz, CURRENT_DATE) AND $3
     ),
-    stop_positions AS (
-      SELECT 
-        s.stop_id,
-        s.name,
-        rs.stop_order,
-        ST_LineLocatePoint(r.path::geometry, s.location::geometry) as stop_pct,
-        MAX(rs.stop_order) OVER () as max_stop_order
-      FROM stops s
-      JOIN route_stops rs ON s.stop_id = rs.stop_id
-      CROSS JOIN routes r
-      WHERE rs.route_id = $1
+    ordered_locations AS (
+      SELECT
+        ll.*,
+        LAG(ll.device_pct) OVER (PARTITION BY ll.device_id ORDER BY ll.recorded_at) as prev_pct,
+        LAG(ll.recorded_at)  OVER (PARTITION BY ll.device_id ORDER BY ll.recorded_at) as prev_time
+      FROM located_locations ll
     ),
     with_data AS (
-      SELECT 
+      SELECT
         ol.*,
-        sp.stop_id as nearest_stop_id,
         sp.name as nearest_stop_name,
         sp.stop_order as nearest_stop_order,
         sp.stop_pct as nearest_stop_pct,
-        sp.max_stop_order,
-        first.stop_pct as first_stop_pct,
-        last.stop_pct as last_stop_pct,
-        AVG(CASE 
-          WHEN prev_time IS NOT NULL 
-          THEN ABS(device_pct - prev_pct) / 
+        fs.name as first_stop_name,
+        fs.stop_pct as first_stop_pct,
+        ls.stop_pct as last_stop_pct,
+        AVG(CASE
+          WHEN prev_time IS NOT NULL
+          THEN ABS(device_pct - prev_pct) /
                NULLIF(EXTRACT(EPOCH FROM (recorded_at - prev_time)) / 60, 0)
         END) OVER (
-          PARTITION BY ol.device_id 
-          ORDER BY ol.recorded_at 
+          PARTITION BY ol.device_id
+          ORDER BY ol.recorded_at
           ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
         ) as avg_speed,
-        CASE 
-          WHEN sp.stop_order = 1 AND ol.device_pct > last.stop_pct 
+        CASE
+          WHEN sp.stop_order = 1 AND ol.device_pct > ls.stop_pct
             AND ABS(1.0 - ol.device_pct) <= 0.01 THEN 'at_stop'
           WHEN ABS(ol.device_pct - sp.stop_pct) <= 0.01 THEN 'at_stop'
-          WHEN ol.device_pct < sp.stop_pct 
-            OR (sp.stop_order = 1 AND ol.device_pct > last.stop_pct) THEN 'approaching'
+          WHEN ol.device_pct < sp.stop_pct
+            OR (sp.stop_order = 1 AND ol.device_pct > ls.stop_pct) THEN 'approaching'
           ELSE 'departed'
         END as status,
         ROW_NUMBER() OVER (PARTITION BY ol.device_id ORDER BY ol.recorded_at DESC) as rn
       FROM ordered_locations ol
-      CROSS JOIN (SELECT stop_pct FROM stop_positions WHERE stop_order = 1) as first
-      CROSS JOIN (SELECT stop_pct FROM stop_positions ORDER BY stop_order DESC LIMIT 1) as last
+      CROSS JOIN first_stop fs
+      CROSS JOIN last_stop ls
       CROSS JOIN LATERAL (
-        SELECT * FROM stop_positions
-        ORDER BY 
-          CASE 
-            WHEN ol.device_pct > (SELECT stop_pct FROM stop_positions ORDER BY stop_order DESC LIMIT 1) 
-              AND stop_order = 1 THEN ABS(1.0 - ol.device_pct)
+        SELECT name, stop_order, stop_pct FROM stop_positions
+        ORDER BY
+          CASE
+            WHEN ol.device_pct > ls.stop_pct AND stop_order = 1
+              THEN ABS(1.0 - ol.device_pct)
             ELSE ABS(stop_pct - ol.device_pct)
           END
         LIMIT 1
       ) sp
     )
-    SELECT 
+    SELECT
       wd.location_id,
       wd.device_id,
       wd.device_name,
@@ -166,42 +174,42 @@ export async function getNextStopWithETA(routeId, startTime, endTime) {
       wd.nearest_stop_name,
       wd.nearest_stop_order,
       wd.status,
-      CASE 
+      CASE
         WHEN wd.status = 'approaching' THEN wd.nearest_stop_name
-        ELSE COALESCE(next.name, (SELECT name FROM stop_positions WHERE stop_order = 1))
+        ELSE COALESCE(next.name, wd.first_stop_name)
       END as next_stop_name,
-      CASE 
+      CASE
         WHEN wd.status = 'approaching' THEN wd.nearest_stop_order
         ELSE COALESCE(next.stop_order, 1)
       END as next_stop_order,
       ROUND((wd.avg_speed * 100)::numeric, 4) as speed_pct_per_min,
-      CASE 
-        WHEN wd.avg_speed > 0 THEN 
+      CASE
+        WHEN wd.avg_speed > 0 THEN
           ROUND((
-            CASE 
-              WHEN wd.status = 'approaching' AND wd.nearest_stop_order = 1 THEN 
+            CASE
+              WHEN wd.status = 'approaching' AND wd.nearest_stop_order = 1 THEN
                 ABS(1.0 - wd.device_pct) + wd.first_stop_pct
-              WHEN wd.status = 'approaching' THEN 
+              WHEN wd.status = 'approaching' THEN
                 ABS(wd.nearest_stop_pct - wd.device_pct)
-              WHEN next.stop_pct IS NOT NULL THEN 
+              WHEN next.stop_pct IS NOT NULL THEN
                 ABS(next.stop_pct - wd.device_pct)
-              ELSE 
+              ELSE
                 ABS(1.0 - wd.device_pct) + wd.first_stop_pct
             END / wd.avg_speed
           )::numeric, 1)
-        ELSE NULL 
+        ELSE NULL
       END as eta_minutes
     FROM with_data wd
     LEFT JOIN LATERAL (
       SELECT name, stop_order, stop_pct
-      FROM stop_positions 
+      FROM stop_positions
       WHERE stop_order > wd.nearest_stop_order
       ORDER BY stop_order
       LIMIT 1
     ) next ON true
     WHERE wd.rn = 1
     ORDER BY wd.device_id`,
-    [routeId, startTime || 'CURRENT_DATE', endTime || '2099-12-31']
+    [routeId, startTime || null, endTime || '2099-12-31']
   );
   
   return result.rows;

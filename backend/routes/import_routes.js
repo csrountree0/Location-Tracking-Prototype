@@ -104,7 +104,7 @@ export async function importFromGPX(filePath, routeName) {
 // function to test importing, can also serve as actual import function
 async function testImport() {
   try {
-    const result = await importFromGPX('gpx_files/campus_test_2.gpx', 'Test_Route_2');
+    const result = await importFromGPX('gpx_files/campus_test_2U.gpx', 'Test_Route_2_Updated');
     console.log('Success:', result);
   } catch (err) {
     console.error('Failed:', err.message);
