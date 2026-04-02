@@ -216,6 +216,46 @@ export async function getNextStopWithETA(routeId, startTime, endTime) {
 }
 
 
+// get latest location per device and whether each is on or off the given route
+export async function getLatestLocationsWithRouteStatus(routeId) {
+  const result = await pool.query(`
+    WITH route AS (
+      SELECT path FROM routes WHERE route_id = $1
+    ),
+    latest AS (
+      SELECT DISTINCT ON (d.id)
+        d.id AS device_id,
+        d.name,
+        l.location,
+        l.recorded_at
+      FROM devices d
+      JOIN locations l ON l.device_id = d.id
+      ORDER BY d.id, l.recorded_at DESC
+    )
+    SELECT
+      l.device_id,
+      l.name,
+      ST_Y(l.location::geometry) AS lat,
+      ST_X(l.location::geometry) AS lon,
+      l.recorded_at,
+      haversine.dist_m AS distance_from_route_m,
+      CASE WHEN haversine.dist_m > 30 THEN 'off_route' ELSE 'on_route' END AS route_status
+    FROM latest l
+    CROSS JOIN route r
+    CROSS JOIN LATERAL (
+      SELECT ROUND(ST_Distance(
+        l.location::geography,
+        ST_LineInterpolatePoint(r.path::geometry, ST_LineLocatePoint(r.path::geometry, l.location::geometry))::geography
+      )::numeric, 1) AS dist_m
+    ) haversine
+    ORDER BY l.device_id`,
+    [routeId]
+  );
+
+  return result.rows;
+}
+
+
 // close the connection
 export async function closePool() {
   await pool.end();

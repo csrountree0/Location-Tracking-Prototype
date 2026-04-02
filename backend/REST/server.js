@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { getLatestLocations,getAllRoutesWithStops, getAllLocations,getNextStopWithETA, closePool } from './db/db.js';
+import { getLatestLocations, getAllRoutesWithStops, getAllLocations, getNextStopWithETA, getLatestLocationsWithRouteStatus, closePool } from './db/db.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,6 +38,34 @@ app.get('/api/all', async (req, res) => {
   } catch (err) {
     console.error('Failed to fetch devices:', err);
     res.status(500).json({ error: 'Failed to fetch data' });
+  }
+});
+
+// get latest location per device and on/off route status
+// /api/routestatus?routeId=1
+app.get('/api/locationstatus', async (req, res) => {
+  try {
+    const { routeId } = req.query;
+
+    if (!routeId) {
+      return res.status(400).json({ error: 'routeId required' });
+    }
+
+    const devices = await getLatestLocationsWithRouteStatus(parseInt(routeId));
+    res.json({
+      count: devices.length,
+      vehicles: devices.map(v => ({
+        deviceId: v.device_id,
+        name: v.name,
+        location: { lat: parseFloat(v.lat), lon: parseFloat(v.lon) },
+        lastUpdated: v.recorded_at,
+        distanceFromRouteM: v.distance_from_route_m ? parseFloat(v.distance_from_route_m) : null,
+        routeStatus: v.route_status
+      }))
+    });
+  } catch (err) {
+    console.error('Route status endpoint error:', err);
+    res.status(500).json({ error: 'Failed to retrieve route status' });
   }
 });
 
