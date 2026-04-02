@@ -8,25 +8,35 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19
 }).addTo(map);
 
+// CIRCLE STYLES
+const activeCartStyle = {
+  radius: 6,
+  fillColor: "#22c55e",
+  color: "#fff",
+  weight: 2,
+  opacity: 1,
+  fillOpacity: 0.9
+};
 
-// ICONS
-const activeCartIcon = L.icon({
-  iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
-  iconSize: [32, 32]
-});
+const staleCartStyle = {
+  radius: 6,
+  fillColor: "#f97316",
+  color: "#fff",
+  weight: 2,
+  opacity: 1,
+  fillOpacity: 0.9
+};
 
-const staleCartIcon = L.icon({
-  iconUrl: "https://maps.google.com/mapfiles/ms/icons/orange-dot.png",
-  iconSize: [32, 32]
-});
+const stopStyle = {
+  radius: 8,
+  fillColor: "#ef4444",
+  color: "#fff",
+  weight: 2,
+  opacity: 1,
+  fillOpacity: 0.9
+};
 
-const stopIcon = L.icon({
-  iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
-  iconSize: [32, 32]
-});
-
-
-// LEGEND
+// LEGEND, KEY
 const legend = L.control({ position: "bottomright" });
 
 legend.onAdd = function () {
@@ -41,26 +51,18 @@ legend.onAdd = function () {
       font-size: 14px;
     ">
       <b>Map Key</b><br><br>
-      <img src="https://maps.google.com/mapfiles/ms/icons/green-dot.png" width="16"> Active Cart<br>
-      <img src="https://maps.google.com/mapfiles/ms/icons/orange-dot.png" width="16"> Stale Cart<br>
-      <img src="https://maps.google.com/mapfiles/ms/icons/red-dot.png" width="16"> Stop<br>
-      <div style="
-        width: 20px;
-        height: 4px;
-        background: blue;
-        display: inline-block;
-        margin-right: 5px;
-      "></div> Device History Trail
+      <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#22c55e;border:2px solid white;"></span> Active Cart<br>
+      <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#f97316;border:2px solid white;"></span> Stale Cart<br>
+      <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ef4444;border:2px solid white;"></span> Stop
     </div>
   `;
-
   return div;
 };
 
 legend.addTo(map);
 
-// FETCH ROUTE STOPS (STATIC)
-fetch("https://bloops0.tail98a4de.ts.net/API/routes")
+// FETCH ROUTE + STOP
+fetch("https://bloops0.tail98a4de.ts.net:8443/API/routes")
   .then(res => res.json())
   .then(data => {
 
@@ -68,81 +70,34 @@ fetch("https://bloops0.tail98a4de.ts.net/API/routes")
 
     const firstRoute = data[0];
 
+    // Drawing route line
+    if (firstRoute.path?.coordinates) {
+      const coords = firstRoute.path.coordinates.map(c => [c[1], c[0]]);
+      const routeLine = L.polyline(coords, { color: "blue", weight: 4 }).addTo(map);
+      map.fitBounds(routeLine.getBounds());
+    }
+
+    // Drawing stops
     if (Array.isArray(firstRoute.stops)) {
       firstRoute.stops.forEach(stop => {
-
         const coords = stop.location?.coordinates;
         if (!coords) return;
 
-        L.marker([coords[1], coords[0]], { icon: stopIcon })
+        L.circleMarker([coords[1], coords[0]], stopStyle)
           .addTo(map)
           .bindPopup(stop.name || "Stop");
       });
     }
 
   })
-  .catch(err => console.error("Stops fetch error:", err));
+  .catch(err => console.error("Routes fetch error:", err));
 
-// DEVICE HISTORY (MULTI READY)
-let devicePolylines = {};
+// LIVE TRACKING + ETA
 let deviceMarkers = {};
 
-function fetchFullHistory() {
-
-  fetch("https://bloops0.tail98a4de.ts.net/API/all")
-    .then(res => res.json())
-    .then(data => {
-
-      if (!Array.isArray(data)) return;
-
-      // Group by device_id
-      const grouped = {};
-
-      data.forEach(point => {
-
-        const id = point.device_id;
-        const lat = Number(point.lat);
-        const lng = Number(point.lon);
-
-        if (isNaN(lat) || isNaN(lng)) return;
-
-        if (!grouped[id]) grouped[id] = [];
-
-        grouped[id].push({
-          lat,
-          lng,
-          recorded_at: point.recorded_at
-        });
-
-      });
-
-      // Draw trail per device
-      Object.keys(grouped).forEach(id => {
-
-        const sortedPoints = grouped[id]
-          .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
-
-        const coordinates = sortedPoints.map(p => [p.lat, p.lng]);
-
-        if (devicePolylines[id]) {
-          devicePolylines[id].setLatLngs(coordinates);
-        } else {
-          devicePolylines[id] = L.polyline(coordinates, {
-            color: "blue",
-            weight: 4
-          }).addTo(map);
-        }
-
-      });
-
-    })
-    .catch(err => console.error("History fetch error:", err));
-}
-
-// LIVE TRACKING (MULTI READY)
 function fetchLiveDevices() {
 
-  fetch("https://bloops0.tail98a4de.ts.net/API/devices")
+  fetch("https://bloops0.tail98a4de.ts.net:8443/API/all")
     .then(res => res.json())
     .then(devices => {
 
@@ -160,21 +115,22 @@ function fetchLiveDevices() {
         const now = new Date();
         const diffSeconds = Math.floor((now - recordedTime) / 1000);
 
-        const iconToUse = diffSeconds > 30 ? staleCartIcon : activeCartIcon;
+        const styleToUse = diffSeconds > 30 ? staleCartStyle : activeCartStyle;
 
         const popupContent = `
           <b>${device.name || "Golf Cart"}</b><br>
           Device ID: ${id}<br>
           Recorded: ${recordedTime.toLocaleString()}<br>
-          Status: ${diffSeconds > 30 ? "Stale" : "Active"}
+          Status: ${diffSeconds > 30 ? "Stale" : "Active"}<br>
+          <div id="eta-${id}">Loading ETA...</div>
         `;
 
         if (deviceMarkers[id]) {
           deviceMarkers[id].setLatLng([lat, lng]);
-          deviceMarkers[id].setIcon(iconToUse);
+          deviceMarkers[id].setStyle(styleToUse);
           deviceMarkers[id].setPopupContent(popupContent);
         } else {
-          deviceMarkers[id] = L.marker([lat, lng], { icon: iconToUse })
+          deviceMarkers[id] = L.circleMarker([lat, lng], styleToUse)
             .addTo(map)
             .bindPopup(popupContent);
         }
@@ -185,9 +141,54 @@ function fetchLiveDevices() {
     .catch(err => console.error("Live fetch error:", err));
 }
 
-// INITIAL LOAD
-fetchFullHistory();
-fetchLiveDevices();
+// ETA FETCH
+function fetchETA() {
 
-// Refresh live every 5 seconds
-setInterval(fetchLiveDevices, 5000);
+  fetch("https://bloops0.tail98a4de.ts.net:8443/API/eta?routeId=8")
+    .then(res => res.json())
+    .then(data => {
+
+      if (!data.vehicles) return;
+
+      data.vehicles.forEach(vehicle => {
+
+        const id = vehicle.deviceId;
+        const eta = vehicle.etaMinutes;
+        const nextStop = vehicle.nextStop;
+        const status = vehicle.status;
+
+        const etaText = eta !== null
+          ? `${eta.toFixed(1)} min`
+          : "N/A";
+
+        if (deviceMarkers[id]) {
+
+          const popup = deviceMarkers[id].getPopup();
+          if (!popup) return;
+
+          const content = popup.getContent();
+
+          const updated = content.replace(
+            /<div id="eta-.*?<\/div>/,
+            `<div id="eta-${id}">
+              <b>Next Stop:</b> ${nextStop || "N/A"}<br>
+              <b>ETA:</b> ${etaText}<br>
+              <b>Status:</b> ${status}
+            </div>`
+          );
+
+          deviceMarkers[id].setPopupContent(updated);
+        }
+
+      });
+
+    })
+    .catch(err => console.error("ETA fetch error:", err));
+}
+
+// START LOOP
+fetchLiveDevices();
+fetchETA();
+
+setInterval(fetchLiveDevices, 2000);
+setInterval(fetchETA, 5000);
