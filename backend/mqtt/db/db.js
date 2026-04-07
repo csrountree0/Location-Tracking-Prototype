@@ -61,6 +61,11 @@ export async function insertLocation(deviceId, lat, lon, timestamp) {
 export async function processLocationData(data) {
   const { Device, lat, lon, timestamp } = data;
 
+  // dont write to db if positon is 0,0
+  if (!lat || !lon) {
+    return null;
+  }
+
   // get/create the device
   const deviceId = await getOrCreateDevice(Device);
 
