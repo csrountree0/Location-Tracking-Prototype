@@ -1,8 +1,23 @@
 import Aedes from 'aedes';
 import { createServer } from 'net';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const PORT = 1883;
 const aedes = new Aedes();
+
+aedes.authenticate = (_client, username, password, callback) => {
+  const validUser = username === process.env.MQTT_USERNAME;
+  const validPass = password && password.toString() === process.env.MQTT_PASSWORD;
+  if (validUser && validPass) {
+    callback(null, true);
+  } else {
+    const error = new Error('Authentication failed');
+    error.returnCode = 4;
+    callback(error, false);
+  }
+};
 
 const server = createServer(aedes.handle);
 

@@ -7,7 +7,9 @@ dotenv.config();
 //mqtt://localhost:1883
 const client = mqtt.connect(process.env.url, {
   clientId: 'db_subscriber',
-  clean: true
+  clean: true,
+  username: process.env.MQTT_USERNAME,
+  password: process.env.MQTT_PASSWORD,
 });
 
 // connect to broker
@@ -23,7 +25,7 @@ client.on('connect', () => {
 });
 
 // when a message is received, parse it and insert into database
-client.on('message', async (topic, message) => {
+client.on('message', async (_topic, message) => {
   try {
     const data = JSON.parse(message.toString());
 
