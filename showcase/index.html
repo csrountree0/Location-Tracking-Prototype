@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Citrus Connection AVL System Prototype</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="./style.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+<div style="display:flex; flex-direction:column; height:100vh;">
+  <header>
+    <span class="header-brand"><span style="color:#4ade80">Citrus</span> <span style="color:#f97316">Connection</span></span>
+    <span class="header-divider"></span>
+    <span class="header-sub">AVL System Prototype</span>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div id="vehicleCards"></div>
+
+      <div class="card controls-card">
+        <div class="btn-group">
+          <button class="btn btn-secondary" onclick="prev()" title="Step back">◀</button>
+          <button class="btn btn-primary" id="playBtn" onclick="togglePlay()">▶ Play</button>
+          <button class="btn btn-secondary" onclick="next()" title="Step forward">▶▶</button>
+        </div>
+        <input type="range" id="slider" min="0" max="0" value="0" oninput="jumpTo(this.value)">
+        <div class="controls-bottom">
+          <span id="counter">— / —</span>
+          <div class="speed-control">
+            <label for="speedSelect">Speed</label>
+            <select id="speedSelect" onchange="setSpeed(this.value)">
+              <option value="1000">Real Time</option>
+              <option value="40">0.5×</option>
+              <option value="20" selected>1×</option>
+              <option value="10">2×</option>
+              <option value="4">5×</option>
+              <option value="2">10×</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <main class="map-wrap">
+      <div id="map"></div>
+      <div id="errorOverlay" class="error-overlay" style="display:none">
+        <div class="error-box">
+          <div class="error-icon">⚠</div>
+          <h3>Could not load tracking data</h3>
+          <p>Place <code>output.json</code> in this directory and reload.</p>
+          <p>Serve locally with: <code>npx serve .</code></p>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  const map = L.map('map', {
+    zoomSnap: 0.1,
+    zoomDelta: 0.25,
+    wheelPxPerZoomLevel: 80
+  });
+
+  
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    keepBuffer: 4,
+    noWrap: true
+  }).addTo(map);
+
+  let positions    = [];
+  let currentIndex = 0;
+  let playing      = false;
+  let playInterval = null;
+  let playSpeed    = 20;
+  let devices      = new Map();
+  let markers      = new Map();
+
+  const colors = ['#f97316', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22'];
+
+  const STATUS_LABEL = { at_stop: 'At Stop', approaching: 'Approaching', departed: 'In Transit' };
+  const STATUS_CLASS = { at_stop: 'badge-at-stop', approaching: 'badge-approaching', departed: 'badge-departed' };
+
+  function safeName(name) { return name.replace(/[^a-zA-Z0-9]/g, '-'); }
+  function displayName(name) { return name.replace(/tracker\s*(\d+)/i, 'Cart $1'); }
+
+  function formatETA(eta_minutes, recorded_at) {
+    if (eta_minutes == null) return null;
+    const totalSec = Math.round(parseFloat(eta_minutes) * 60);
+    if (totalSec <= 0) return 'Arriving';
+    const mins = Math.floor(totalSec / 60);
+    const minStr = mins < 1 ? '<1 min' : `${mins} min`;
+    if (!recorded_at) return minStr;
+    const arrivalTime = new Date(new Date(recorded_at).getTime() + totalSec * 1000);
+    const timeStr = arrivalTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return `${minStr} · ${timeStr}`;
+  }
+
+  function formatTime(ts) {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  async function loadData() {
+    let data;
+    try {
+      const res = await fetch('./output.json');
+      if (!res.ok) throw new Error(res.status);
+      data = await res.json();
+    } catch (e) {
+      document.getElementById('errorOverlay').style.display = 'flex';
+      return;
+    }
+
+    data.forEach(p => {
+      if (!devices.has(p.device_name)) {
+        devices.set(p.device_name, { positions: [], color: colors[devices.size % colors.length] });
+      }
+      devices.get(p.device_name).positions.push(p);
+    });
+
+    devices.forEach(d => d.positions.sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at)));
+    positions = [...data].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+
+    const sortedDeviceNames = [...devices.keys()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    const container = document.getElementById('vehicleCards');
+    sortedDeviceNames.forEach(name => {
+      const device = devices.get(name);
+      const safe   = safeName(name);
+      const card   = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <div class="vehicle-header">
+          <span class="vehicle-dot" style="background:${device.color}"></span>
+          <span class="vehicle-name">${displayName(name)}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Current Stop</span>
+          <span class="info-value" id="v-nearest-${safe}">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Status</span>
+          <span class="badge badge-unknown" id="v-status-${safe}">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Next Stop</span>
+          <span class="info-value" id="v-next-${safe}">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">ETA</span>
+          <span class="info-value" id="v-eta-${safe}">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Route</span>
+          <span class="badge badge-unknown" id="v-route-${safe}">—</span>
+        </div>
+        <div class="info-row" style="border-bottom:none">
+          <span class="info-label">Last Updated</span>
+          <span class="info-value" id="v-time-${safe}">—</span>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+
+    sortedDeviceNames.forEach(name => {
+      const device = devices.get(name);
+
+      const vehicleIcon = L.divIcon({
+        className: '',
+        html: `<div style="
+          width:30px; height:30px; border-radius:50%;
+          background:${device.color};
+          border:3px solid white;
+          box-shadow:0 3px 10px rgba(0,0,0,0.5);
+        "></div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -20]
+      });
+
+      const marker = L.marker([0, 0], { icon: vehicleIcon }).addTo(map);
+
+      const labelIcon = L.divIcon({
+        className: '',
+        html: `<div class="vehicle-map-label" style="border-color:${device.color}66">${displayName(name)}</div>`,
+        iconSize: [100, 24],
+        iconAnchor: [50, -19]
+      });
+      const labelMarker = L.marker([0, 0], { icon: labelIcon, interactive: false }).addTo(map);
+
+      markers.set(name, { marker, labelMarker });
+    });
+
+    const stopIcon = L.divIcon({
+      className: '',
+      html: `<div style="
+        width:24px; height:24px;
+        background:#e74c3c;
+        border:3px solid white;
+        border-radius:3px;
+        transform:rotate(45deg);
+        box-shadow:0 3px 9px rgba(0,0,0,0.45);
+      "></div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+      popupAnchor: [0, -16]
+    });
+
+    map.fitBounds(L.latLngBounds(data.map(p => [p.lat, p.lon])), { padding: [40, 40] });
+
+    fetch('./route.json')
+      .then(r => r.json())
+      .then(route => {
+        if (route.path) {
+          L.geoJSON(route.path, {
+            style: { color: '#2563eb', weight: 9, opacity: 0.9 }
+          }).addTo(map).bindPopup(`<b>${route.name}</b>`);
+        }
+        (route.stops || []).forEach(stop => {
+          if (!stop.location) return;
+          const [lon, lat] = stop.location.coordinates;
+          L.marker([lat, lon], { icon: stopIcon })
+            .addTo(map)
+            .bindPopup(`<strong style="font-size:14px">${stop.name}</strong>`, { closeButton: false, maxWidth: 200 })
+            .on('click', function () { this.openPopup(); });
+        });
+      })
+      .catch(() => {});
+
+    document.getElementById('slider').max = positions.length - 1;
+    updateDisplay();
+  }
+
+  function updateDisplay() {
+    const p = positions[currentIndex];
+    if (!p) return;
+
+    const currentTime = new Date(p.recorded_at);
+
+    devices.forEach((device, name) => {
+      const closest = device.positions.reduce((best, pos) =>
+        Math.abs(new Date(pos.recorded_at) - currentTime) <
+        Math.abs(new Date(best.recorded_at) - currentTime) ? pos : best
+      , device.positions[0]);
+
+      const safe = safeName(name);
+      const m    = markers.get(name);
+      m.marker.setLatLng([closest.lat, closest.lon]);
+      m.labelMarker.setLatLng([closest.lat, closest.lon]);
+
+      document.getElementById(`v-nearest-${safe}`).textContent = closest.nearest_stop_name || '—';
+
+      const sb = document.getElementById(`v-status-${safe}`);
+      sb.textContent = STATUS_LABEL[closest.status] || closest.status;
+      sb.className   = `badge ${STATUS_CLASS[closest.status] || 'badge-unknown'}`;
+
+      document.getElementById(`v-next-${safe}`).textContent = closest.next_stop_name || '—';
+
+      const etaEl = document.getElementById(`v-eta-${safe}`);
+      etaEl.textContent = closest.status === 'at_stop'
+        ? 'At Stop'
+        : (formatETA(closest.eta_minutes, closest.recorded_at) || '—');
+
+      const offRoute = closest.route_status === 'off_route' || parseFloat(closest.distance_from_route_m) > 10;
+      const rb = document.getElementById(`v-route-${safe}`);
+      rb.textContent = offRoute
+        ? `Off Route · ${parseFloat(closest.distance_from_route_m).toFixed(1)} m`
+        : 'On Route';
+      rb.className = `badge ${offRoute ? 'badge-off-route' : 'badge-on-route'}`;
+
+      document.getElementById(`v-time-${safe}`).textContent = formatTime(closest.recorded_at);
+    });
+
+    document.getElementById('slider').value        = currentIndex;
+    document.getElementById('counter').textContent = `${currentIndex + 1} / ${positions.length}`;
+  }
+
+  function togglePlay() { playing ? pause() : play(); }
+
+  function play() {
+    if (playing) return;
+    playing = true;
+    document.getElementById('playBtn').textContent = '⏸ Pause';
+    playInterval = setInterval(() => {
+      if (currentIndex >= positions.length - 1) { currentIndex = 0; updateDisplay(); return; }
+      next();
+    }, playSpeed);
+  }
+
+  function pause() {
+    playing = false;
+    clearInterval(playInterval);
+    document.getElementById('playBtn').textContent = '▶ Play';
+  }
+
+  function next() { if (currentIndex < positions.length - 1) { currentIndex++; updateDisplay(); } }
+  function prev() { if (currentIndex > 0) { currentIndex--; updateDisplay(); } }
+  function jumpTo(i) { currentIndex = parseInt(i); updateDisplay(); }
+  function setSpeed(ms) { playSpeed = parseInt(ms); if (playing) { pause(); play(); } }
+
+  loadData().catch(() => {
+    document.getElementById('errorOverlay').style.display = 'flex';
+  });
+</script>
+</body>
+</html>
