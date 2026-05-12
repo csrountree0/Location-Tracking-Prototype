@@ -1,0 +1,271 @@
+#include "BotleticsSIM7000.h"
+#include <ArduinoJson.h>
+#include <SoftwareSerial.h>
+
+#define BOTLETICS_PWRKEY 6
+#define RST 7
+#define TX 10 
+#define RX 11 
+
+#define LED 13 
+
+#define samplingRate 1 // The time we want to delay after each post (in seconds)
+
+unsigned long lastMillis = 0;
+
+SoftwareSerial modemSS = SoftwareSerial(TX, RX);
+SoftwareSerial *modemSerial = &modemSS;
+Botletics_modem_LTE modem = Botletics_modem_LTE();
+
+#define MQTT_SERVER "MQTT_IP"
+#define MQTT_PORT MQTT_PORT
+#define MQTT_USERNAME    "MQTT_USERNAME"
+#define MQTT_PASSWORD    "MQTT_PASSWORD"
+
+#define GPS_TOPIC       "devices/trackercell1"
+
+uint8_t txfailures = 0;
+
+uint8_t type;
+float latitude, longitude, speed_kph, heading, altitude, second;
+uint16_t year;
+uint8_t month, day, hour, minute;
+uint8_t counter = 0;
+unsigned long timer = 0;
+bool firstTime = true;
+
+
+char replybuffer[255]; 
+
+void setup() 
+{
+  Serial.begin(9600);
+
+  #ifdef LED
+    pinMode(LED, OUTPUT);
+    digitalWrite(LED, LOW);
+  #endif
+  
+  pinMode(RST, OUTPUT);
+  digitalWrite(RST, HIGH); // Default state
+
+  modem.powerOn(BOTLETICS_PWRKEY); // Power on the module
+  moduleSetup(); // Establishes first-time serial comm 
+
+  modem.setFunctionality(1); // AT+CFUN=1
+  modem.setNetworkSettings(F("mnet")); 
+
+  while (!modem.enableGPS(true)) 
+  {
+    Serial.println(F("Failed to turn on GPS, retrying..."));
+    delay(2000); // Retry every 2s
+  }
+  Serial.println(F("Turned on GPS!"));
+}
+
+void loop() 
+{
+  if (firstTime || millis() - timer > samplingRate * 1000UL) 
+  {    
+
+    while (!netStatus()) 
+    {
+      Serial.println(F("Failed to connect to cell network, retrying..."));
+      delay(2000); // Retry every 2s
+    }
+    Serial.println(F("Connected to cell network!"));
+  
+    // Open wireless connection if not already activated
+    if (!modem.wirelessConnStatus()) 
+    {
+      while (!modem.openWirelessConnection(true)) 
+      {
+        Serial.println(F("Failed to enable connection, retrying..."));
+        delay(2000); // Retry every 2s
+      }
+      Serial.println(F("Enabled data!"));
+    }
+    else 
+    {
+      Serial.println(F("Data already enabled!"));
+    }
+  
+  
+    // Turn on GPS if it wasn't on already (e.g., if the module wasn't turned off)
+  #ifdef turnOffShield
+    while (!modem.enableGPS(true)) 
+    {
+      Serial.println(F("Failed to turn on GPS, retrying..."));
+      delay(2000); // Retry every 2s
+    }
+    Serial.println(F("Turned on GPS!"));
+  #endif
+  
+    // Get a fix on location, try every 2s
+    while (!modem.getGPS(&latitude, &longitude, &speed_kph, &heading, &altitude)) 
+    {
+      Serial.println(F("Failed to get GPS location, retrying..."));
+      delay(2000); // Retry every 2s
+    }
+    Serial.println(F("---------------------"));
+    Serial.print(F("Latitude: ")); Serial.println(latitude, 6);
+    Serial.print(F("Longitude: ")); Serial.println(longitude, 6);
+    //Serial.print(F("Speed: ")); Serial.println(speed_kph);
+    //Serial.print(F("Heading: ")); Serial.println(heading);
+    //Serial.print(F("Altitude: ")); Serial.println(altitude);
+    Serial.println(F("---------------------"));
+    
+    // If not already connected, connect to MQTT
+    if (! modem.MQTT_connectionStatus()) 
+    {
+      // Set up MQTT parameters (see MQTT app note for explanation of parameter values)
+      modem.MQTT_setParameter("URL", MQTT_SERVER, MQTT_PORT);
+      modem.MQTT_setParameter("USERNAME",  MQTT_USERNAME);
+      modem.MQTT_setParameter("PASSWORD",  MQTT_PASSWORD);
+
+      Serial.println(F("Connecting to MQTT broker..."));
+      if (! modem.MQTT_connect(true)) 
+      {
+        Serial.println(F("Failed to connect to broker!"));
+      }
+    }
+    else 
+    {
+      Serial.println(F("Already connected to MQTT server!"));
+    }
+  
+    if (millis() - lastMillis > 1000) 
+    {
+      JsonDocument doc;
+
+      doc["Device"] = "TrackerCell1"; //change depending on tracker
+      doc["lat"] = latitude;
+      doc["lon"] = longitude;
+
+      char buffer[256];
+      serializeJson(doc, buffer);
+
+      lastMillis = millis();
+      modem.MQTT_publish("devices/trackercell1", buffer, strlen(buffer), 1, 0); //change depending on tracker
+    }
+  
+  
+    // Delay until next post but read incoming subscribed topic messages (if any)
+    Serial.print(F("Waiting for ")); Serial.print(samplingRate); Serial.println(F(" seconds\r\n"));
+
+    firstTime = false;
+    timer = millis(); // Reset timer at the end
+  }
+
+  //this can be ignored, but deleting it caused some issues
+  else 
+  {
+    uint8_t i = 0;
+    if (modem.available()) 
+    {
+      while (modem.available()) 
+      {
+        replybuffer[i] = modem.read();
+        i++;
+      }
+
+      Serial.print(replybuffer);
+      delay(100); 
+
+      if (strstr(replybuffer, "+SMSUB:") != NULL) 
+      {
+        Serial.println(F("*** Received MQTT message! ***"));
+        
+        char *p = strtok(replybuffer, ",\"");
+        char *topic_p = strtok(NULL, ",\"");
+        char *message_p = strtok(NULL, ",\"");
+        
+        Serial.print(F("Topic: ")); Serial.println(topic_p);
+        Serial.print(F("Message: ")); Serial.println(message_p);
+  
+        // Do something with the message
+        // For example, if the topic was "command" and we received a "yes", turn on an LED!
+        if (strcmp(topic_p, "command") == 0) 
+        {
+          if (strcmp(message_p, "yes") == 0) 
+          {
+            Serial.println(F("Turning on LED!"));
+            digitalWrite(LED, HIGH);
+          }
+          else if (strcmp(message_p, "no") == 0) 
+          {
+            Serial.println(F("Turning off LED!"));
+            digitalWrite(LED, HIGH);
+          }
+        }
+      }
+    }
+  }
+}
+
+void moduleSetup() 
+{
+  // SIM7000 takes about 3s to turn on and SIM7500 takes about 15s
+  // Press Arduino reset button if the module is still turning on and the board doesn't find it.
+  // When the module is on it should communicate right after pressing reset
+
+  // Software serial:
+  modemSS.begin(115200); // Default SIM7000 shield baud rate
+
+  Serial.println(F("Configuring to 9600 baud"));
+  modemSS.println("AT+IPR=9600"); // Set baud rate
+  delay(100); // Short pause to let the command run
+  modemSS.begin(9600);
+  if (! modem.begin(modemSS)) {
+    Serial.println(F("Couldn't find modem"));
+    while (1); // Don't proceed if it couldn't find the device
+  }
+
+  type = modem.type();
+  Serial.println(F("Modem is OK"));
+  Serial.print(F("Found "));
+  switch (type) 
+  {
+    case SIM800L:
+      Serial.println(F("SIM800L")); break;
+    case SIM800H:
+      Serial.println(F("SIM800H")); break;
+    case SIM808_V1:
+      Serial.println(F("SIM808 (v1)")); break;
+    case SIM808_V2:
+      Serial.println(F("SIM808 (v2)")); break;
+    case SIM5320A:
+      Serial.println(F("SIM5320A (American)")); break;
+    case SIM5320E:
+      Serial.println(F("SIM5320E (European)")); break;
+    case SIM7000:
+      Serial.println(F("SIM7000")); break;
+    case SIM7070:
+      Serial.println(F("SIM7070")); break;
+    case SIM7500:
+      Serial.println(F("SIM7500")); break;
+    case SIM7600:
+      Serial.println(F("SIM7600")); break;
+    default:
+      Serial.println(F("???")); break;
+  }
+  
+}
+
+
+
+bool netStatus() 
+{
+  int n = modem.getNetworkStatus();
+  
+  Serial.print(F("Network status ")); Serial.print(n); Serial.print(F(": "));
+  if (n == 0) Serial.println(F("Not registered"));
+  if (n == 1) Serial.println(F("Registered (home)"));
+  if (n == 2) Serial.println(F("Not registered (searching)"));
+  if (n == 3) Serial.println(F("Denied"));
+  if (n == 4) Serial.println(F("Unknown"));
+  if (n == 5) Serial.println(F("Registered roaming"));
+
+  if (!(n == 1 || n == 5)) return false;
+  else return true;
+}

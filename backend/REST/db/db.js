@@ -239,7 +239,7 @@ export async function getLatestLocationsWithRouteStatus(routeId) {
       ST_X(l.location::geometry) AS lon,
       l.recorded_at,
       haversine.dist_m AS distance_from_route_m,
-      CASE WHEN haversine.dist_m > 30 THEN 'off_route' ELSE 'on_route' END AS route_status
+      CASE WHEN haversine.dist_m > 10 THEN 'off_route' ELSE 'on_route' END AS route_status
     FROM latest l
     CROSS JOIN route r
     CROSS JOIN LATERAL (

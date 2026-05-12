@@ -1,5 +1,7 @@
 console.log("APP STARTED");
 
+const API_BASE = "https://your-public-url";
+
 // INITIALIZE MAP
 const map = L.map("map").setView([28.1480, -81.8484], 15);
 
@@ -62,7 +64,7 @@ legend.onAdd = function () {
 legend.addTo(map);
 
 // FETCH ROUTE + STOP
-fetch("https://bloops0.tail98a4de.ts.net:8443/API/routes")
+fetch(`${API_BASE}/api/routes`)
   .then(res => res.json())
   .then(data => {
 
@@ -97,7 +99,7 @@ let deviceMarkers = {};
 
 function fetchLiveDevices() {
 
-  fetch("https://bloops0.tail98a4de.ts.net:8443/API/all")
+  fetch(`${API_BASE}/api/latestlocations`)
     .then(res => res.json())
     .then(devices => {
 
@@ -144,7 +146,7 @@ function fetchLiveDevices() {
 // ETA FETCH
 function fetchETA() {
 
-  fetch("https://bloops0.tail98a4de.ts.net:8443/API/eta?routeId=8")
+  fetch(`${API_BASE}/api/eta?routeId=8`)
     .then(res => res.json())
     .then(data => {
 

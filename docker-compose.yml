@@ -1,0 +1,46 @@
+services:
+  broker:
+    build:
+      context: ./backend/mqtt
+      network: host
+    network_mode: host
+    environment:
+      - MQTT_USERNAME
+      - MQTT_PASSWORD
+
+  db-subscriber:
+    build:
+      context: ./backend/mqtt/db
+      network: host
+    network_mode: host
+    environment:
+      - DB_HOST
+      - DB_PORT
+      - DB_NAME
+      - DB_USER
+      - DB_PASSWORD
+      - MQTT_USERNAME
+      - MQTT_PASSWORD
+      - url=mqtt://localhost:1883
+    depends_on:
+      - broker
+
+  rest:
+    build:
+      context: ./backend/REST
+      network: host
+    network_mode: host
+    environment:
+      - DB_HOST
+      - DB_PORT
+      - DB_NAME
+      - DB_USER
+      - DB_PASSWORD
+
+  frontend:
+    build:
+      context: ./frontend
+      network: host
+    network_mode: host
+    depends_on:
+      - rest
