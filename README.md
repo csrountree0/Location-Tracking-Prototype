@@ -22,7 +22,7 @@ Real-time GPS tracking and ETA prediction prototype system built for the Citrus 
 | DB Subscriber | `backend/mqtt/db/` | Consumes MQTT messages and writes locations to PostgreSQL |
 | REST API | `backend/REST/` | Serves locations, routes, and ETAs with server-side caching |
 | Route Importer | `backend/routes/` | One-time utility to load GPX route files into PostGIS |
-| Frontend | `frontend/` | Static Leaflet.js dashboard; no build step required |
+| Frontend | `frontend/` | Static Leaflet.js dashboard |
 
 ---
 
